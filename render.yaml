@@ -1,37 +1,84 @@
+# -----------------------------------------------------------------------
+# OpenClaw — Render Blueprint (FREE TIER, no payment method required)
+# Model provider: OpenRouter
+# -----------------------------------------------------------------------
+# This is a modified version of OpenClaw's official Render blueprint.
+# Differences from the official templates:
+#   - plan: free            (Render's official template uses "pro"; the
+#                             OpenClaw docs default to "starter" — both
+#                             require a card on file)
+#   - no `disk:` block       (free tier does not support persistent disks
+#                             at all — including one will cause the deploy
+#                             to fail or silently force a paid plan)
+#
+# TRADE-OFFS you're accepting by using this file (see chat for detail):
+#   - No persistent storage: config, channel logins (WhatsApp/Slack/etc),
+#     and session state are wiped on every redeploy AND on every restart
+#     caused by spin-down. You'll re-run /setup and reconnect channels
+#     each time this happens.
+#   - Spins down after 15 minutes of no traffic; the next request pays a
+#     cold-start delay (several seconds) before OpenClaw responds.
+#   - Free instance has less CPU/RAM than Render's officially supported
+#     minimum (Pro), so expect it to run slower, especially during
+#     model calls or on first boot.
+#
+# HOW TO USE:
+#   1. Push this file to the root of your own fork of the OpenClaw repo
+#      (replacing its existing render.yaml), or the render-examples fork.
+#   2. In the Render Dashboard: New -> Blueprint -> connect your repo.
+#   3. Render will prompt you for the OPENROUTER_API_KEY env var (flagged
+#      `sync: false` below) — get one from openrouter.ai/keys and paste
+#      it there, not in this file.
+#   4. Deploy. No payment method should be requested for a single free
+#      web service with no disk attached.
+# -----------------------------------------------------------------------
+
 services:
   - type: web
     name: openclaw
     runtime: docker
-    # Standard (~2GB RAM) is too small for a ~1.5GB+ Node heap + proxy; Pro (~4GB) fits NODE_OPTIONS below.
-    plan: pro
+    plan: free
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: "10000"
-      # Heap must stay below instance RAM (see https://render.com/docs/blueprint-spec#plan).
-      - key: NODE_OPTIONS
-        value: "--max-old-space-size=3072"
+      # Port the OpenClaw gateway binds to inside the container.
+      # Must match what the Dockerfile exposes.
+      - key: OPENCLAW_GATEWAY_PORT
+        value: "8080"
+
+      # State/workspace dirs. On free tier (no disk) these still need to
+      # point somewhere writable inside the container — they just won't
+      # persist across restarts/deploys.
       - key: OPENCLAW_STATE_DIR
-        value: /data/.openclaw
+        value: /tmp/.openclaw
       - key: OPENCLAW_WORKSPACE_DIR
-        value: /data/workspace
+        value: /tmp/workspace
+
+      # Auto-generated secret used to authenticate to the Control UI.
+      # Find the actual value later under Dashboard -> Environment.
       - key: OPENCLAW_GATEWAY_TOKEN
         generateValue: true
-      # Primary AI providers (set at least one)
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: GEMINI_API_KEY
-        sync: false
-      # Additional providers (optional)
+
+      # OpenRouter as the model provider. Render will prompt you for the
+      # actual key value during Blueprint creation (sync: false = not
+      # stored in this file).
       - key: OPENROUTER_API_KEY
         sync: false
-      - key: MOONSHOT_API_KEY
-        sync: false
-      - key: MINIMAX_API_KEY
-        sync: false
-    disk:
-      name: openclaw-data
-      mountPath: /data
-      sizeGB: 5
+
+      # OpenRouter is a proxy provider — model IDs MUST be prefixed with
+      # "openrouter/", e.g. "openrouter/anthropic/claude-sonnet-4.5" or
+      # "openrouter/google/gemini-2.5-flash". Using a bare model name
+      # (without the prefix) will fail. Swap this for whichever model
+      # you want as the default.
+      - key: OPENCLAW_PRIMARY_MODEL
+        value: openrouter/anthropic/claude-sonnet-4.5
+
+    # NOTE: no `disk:` block here on purpose — free tier doesn't support
+    # persistent disks. If you later upgrade to `plan: starter`, add:
+    #
+    # disk:
+    #   name: openclaw-data
+    #   mountPath: /data
+    #   sizeGB: 1
+    #
+    # ...and switch OPENCLAW_STATE_DIR / OPENCLAW_WORKSPACE_DIR back to
+    # /data/.openclaw and /data/workspace so they actually persist.
